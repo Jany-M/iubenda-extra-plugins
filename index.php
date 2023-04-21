@@ -1,6 +1,7 @@
 <?php
 /*
 Plugin Name: Iubenda Extra Plugins
+Plugin URI: https://www.shambix.com/
 Description: Iubenda Extra Plugins
 Author: Shambix
 Version: 1.0.2-beta
@@ -17,6 +18,7 @@ class iubenda_extra_class{
 	private $_db_ver = '1.0';
 	public  $textdomain = 'iep';
 	protected static $_instance = null;
+	private $_sep = '__';
 	
 	public function __construct(){
 		global $wpdb;
@@ -36,6 +38,9 @@ class iubenda_extra_class{
 			//since June 24, 2022
 			add_filter('iub_after_call_charitable_forms', array($this, 'get_charitable_forms'), 10, 1 );  
 			add_filter('iub_after_call_ninjaform_forms', array($this, 'get_ninjaform_forms'), 10, 1 );  
+			
+			//since Sept 2, 2022
+			add_filter('iub_after_call_gravityform_forms', array($this, 'get_gravityform_forms'), 10, 1 );  
 		}else{
 			add_action('admin_notices', array($this, 'installation_notices') );
 		}
@@ -98,6 +103,7 @@ class iubenda_extra_class{
 		add_action( 'ninja_forms_after_submission', array( $this, 'sync_ninja_forms' ) );
 		add_action( 'charitable_after_save_donation', array( $this, 'sync_charitable' ), 9999, 2 );
 
+		add_action( 'gform_after_submission', array( $this, 'sync_gravity_form' ), 10, 2 );
 	}
 
 	private function clear_local_cache(){
@@ -128,7 +134,9 @@ class iubenda_extra_class{
 	}
 
 	public function write_log($txt){
-		//return true;
+		//turn off the log
+		return true;
+		
 		$log  = $this->whos_called() . PHP_EOL;
 		$log .= (is_array($txt) || is_object($txt)) ? print_r($txt, 1) : $txt;
 		$log .= PHP_EOL . str_repeat('-', 80) . PHP_EOL;
@@ -282,6 +290,10 @@ class iubenda_extra_class{
 		
 		if($this->is_ninjaform_active()){
 			$sources['ninjaform'] = 'Ninja Form';
+		}
+		
+		if($this->is_gravityform_active()){
+			$sources['gravityform'] = 'Gravity Form';
 		}
 		
 		//$this->write_log($sources);
@@ -503,7 +515,7 @@ class iubenda_extra_class{
 		);		
 		//__________________________________________________________________________________________________________________________
 		
-		//$this->write_log('$consent_data'); $this->write_log($consent_data); $this->write_log(json_encode($consent_data));
+		$this->write_log('$consent_data'); $this->write_log($consent_data); $this->write_log(json_encode($consent_data));
 
 		$response = wp_remote_post( iubenda()->options['cons']['cons_endpoint'], array(
 			'body'    => json_encode( $consent_data ),
@@ -513,13 +525,12 @@ class iubenda_extra_class{
 			),
 		) );
 		
-		//$this->write_log('wp_remote_post $response');
+		$this->write_log('wp_remote_post $response');
 		if ( is_wp_error( $response ) ) {
 			$error_message = $response->get_error_message();
 			$this->write_log("Something went wrong: $error_message");
 		} else {
-			//$this->write_log($response);
-			//$this->get_list_consent($_POST['give_email']);
+			$this->write_log($response);
 		}		
 	}
 	
@@ -692,6 +703,10 @@ return true;
 	
 	public function is_ninjaform_active(){
 		return class_exists( 'Ninja_Forms' );
+	}
+
+	public function is_gravityform_active(){
+		return function_exists( 'gravity_form' );
 	}
 
 	public function get_charitable_forms($forms){
@@ -875,6 +890,7 @@ return true;
 		if( !is_array($filter) ){
 			$filter = array(
 				'input',
+				'textbox',
 				'textarea',
 				'checkbox',
 				'firstname',
@@ -891,7 +907,7 @@ return true;
 				$the_id = (int)$arr['id'];
 				$the_type = $arr['settings']['type'];
 				$the_key = $arr['settings']['key'];
-				$out[] = sprintf('%s||%s||%s', $the_id, $the_type, $the_key);
+				$out[] = sprintf('%s%s%s%s%s', $the_id, $this->_sep, $the_type, $this->_sep, $the_key);
 			}
 		}
 		
@@ -902,7 +918,7 @@ return true;
 		$out = '<form>';
 		if($fields = $this->_get_ninjaform_fields($form_id)){
 			foreach($fields as $field){
-				$arr_field = explode('||', $field);
+				$arr_field = explode($this->_sep, $field);
 				$the_id = (int)$arr_field[0];
 				$the_type = $arr_field[1];
 				$the_key = $arr_field[2];
@@ -954,6 +970,101 @@ return true;
 
 
 
+	protected function _get_gravityform_fields($form_id, $filter = false, $input_name_filter = false){
+		if( !is_array($filter) ){
+			$filter = array(
+				'text',
+				'textarea',
+				'consent',
+				'checkbox',
+				'radio',
+				'lastname',
+				'name',
+				'hidden',
+				'email',
+				//'phone',
+			);
+		}
+
+		$out = false;
+		
+		$form = GFAPI::get_form( $form_id );
+		//$this->write_log($form['fields']);
+		if( !isset($form['fields']) || ! is_array($form['fields']) ) return $out;
+
+
+		foreach ( $form['fields'] as $field ) {
+			if( in_array($field->type, $filter) ){
+				$the_id = (string)$field->id;
+				$the_type = $field->type;
+				$the_key = $field->label;
+				
+				if($the_type == 'consent'){
+					if( isset($field->inputs) && is_array($field->inputs) ){
+						foreach($field->inputs as $j => $r){
+							if(strtolower($r['label']) == 'consent'){
+								$the_id = (string)$r['id'];
+								break;
+							}
+						}
+					}
+					$out[] = sprintf('%s||%s||%s', $the_id, $the_type, $the_key);
+				}else{
+					$out[] = sprintf('%s||%s||%s', $the_id, $the_type, $the_key);
+				}
+			}
+		}
+		
+		return $out;
+	}
+	
+    protected function _get_all_gravityform(){
+        $data = array();		
+        $forms = GFAPI::get_forms();
+        foreach ( $forms as $form) {
+             $data[] = array(
+                 'id'        => $form['id'],
+                 'title'     => $form['title'],
+                 'shortcode' => '',
+                 'date'      => $form['date_created'],
+             );
+        }
+
+        return $data;
+    }
+
+	public function get_gravityform_forms($forms){
+		$source = 'gravityform';
+		
+		$gf_forms = $this->_get_all_gravityform();
+		//$this->write_log($gf_forms);
+		
+		if ( ! empty( $gf_forms ) ) {
+			foreach ( $gf_forms as $i => $form ) {
+				$formdata = array(
+					'object_type'	 => 'post', // object type where the form data is stored
+					'object_id'		 => $form['id'], // unique object id
+					'form_source'	 => $source, // source slug
+					'form_title'	 => $form['title'], // form title
+					//'form_date'		 => $form->created_at, // form last modified date
+					'form_fields'	 => array() // form field names array
+				);
+
+				$input_fields = false;
+				$input_name_filter = false;
+
+				// Parser
+				$form_fields = $this->_get_gravityform_fields($form['id'], $input_fields, $input_name_filter);
+				$formdata['form_fields'] = $form_fields;					
+
+				$forms[] = $formdata;				
+			}
+		}
+
+		$this->write_log($forms);
+		return $forms;
+	}
+
 
 	public function sync_ninja_forms( $data ){
 		///$this->write_log('$data'); $this->write_log($data);
@@ -1002,10 +1113,10 @@ return true;
 			$field_full_name = $arr_subject['full_name'];
 			
 			//sprintf('%s||%s||%s', $the_id, $the_type, $the_key);
-			$arr_field_email = explode('||', $field_email);
-			$arr_field_first_name = explode('||', $field_first_name);
-			$arr_field_last_name = explode('||', $field_last_name);
-			$arr_field_full_name = explode('||', $field_full_name);
+			$arr_field_email = explode($this->_sep, $field_email);
+			$arr_field_first_name = explode($this->_sep, $field_first_name);
+			$arr_field_last_name = explode($this->_sep, $field_last_name);
+			$arr_field_full_name = explode($this->_sep, $field_full_name);
 			
 			//find the value for each field
 			if($the_id = $arr_field_email[0]){
@@ -1057,7 +1168,7 @@ return true;
 				if($key){
 					
 					//sprintf('%s||%s||%s', $the_id, $the_type, $the_key);
-					$arr_tmp = explode('||', $key);
+					$arr_tmp = explode($this->_sep, $key);
 					if($the_id = $arr_tmp[0]){
 						if( isset($formData['fields'][$the_id]['value']) ){
 							$the_value = $formData['fields'][$the_id]['value'];
@@ -1233,6 +1344,163 @@ return true;
 			$this->write_log($response);
 			//$this->get_list_consent($_POST['give_email']);
 		}
+	}
+	
+
+	public function sync_gravity_form($entry, $gf_form){
+		///$this->write_log('$entry'); $this->write_log($entry);
+		///$this->write_log('$gf_form'); $this->write_log($gf_form);
+		
+		global $wp_version;
+		$source = 'gravityform';
+
+		$public_api_key = iubenda()->options['cons']['public_api_key'];
+
+		if ( ! $public_api_key ) {
+			$this->write_log('wp_version: ' . $wp_version);
+			$this->write_log('wp_doing_ajax: ' . wp_doing_ajax());
+			$this->write_log('public_api_key: ' . $public_api_key);
+			return;
+		}
+
+		$form_id   = (int)$gf_form['id'];
+		$form_args = array(
+			'post_status' 	=> array('mapped'),
+			'source'		=> $source,
+			'id'			=> $form_id,
+		);
+
+		$form = iubenda()->forms->get_form_by_object_id($form_args);
+		///$this->write_log($form_args); $this->write_log($form);
+
+		if ( ! $form ) {
+			return;
+		}
+
+		//__________________________________________________________________________________________________________________________
+		$value_email = $value_first_name = $value_last_name = $value_full_name = ''; $form_html = '<form>';
+		if($arr_subject = $form->form_subject){
+			
+			$this->write_log('$arr_subject'); $this->write_log($arr_subject);
+
+			$field_email = $arr_subject['email'];
+			$field_first_name = $arr_subject['first_name'];
+			$field_last_name = $arr_subject['last_name'];
+			$field_full_name = $arr_subject['full_name'];
+			
+			//sprintf('%s||%s||%s', $the_id, $the_type, $the_key);
+			$arr_field_email = explode('||', $field_email);
+			$arr_field_first_name = explode('||', $field_first_name);
+			$arr_field_last_name = explode('||', $field_last_name);
+			$arr_field_full_name = explode('||', $field_full_name);
+			
+			//find the value for each field
+			if($the_id = $arr_field_email[0]){
+				$value_email = rgar( $entry, (string)$the_id );
+				$form_html .= sprintf('<input type="text" name="input_%s">', $the_id);
+			}
+			
+			if($the_id = $arr_field_first_name[0]){
+				$value_first_name = rgar( $entry, (string)$the_id );
+				$form_html .= sprintf('<input type="text" name="input_%s">', $the_id);
+			}
+			
+			if($the_id = $arr_field_last_name[0]){
+				$value_last_name = rgar( $entry, (string)$the_id );
+				$form_html .= sprintf('<input type="text" name="input_%s">', $the_id);
+			}
+			
+			if($the_id = $arr_field_full_name[0]){
+				$value_full_name = rgar( $entry, (string)$the_id );
+				$form_html .= sprintf('<input type="text" name="input_%s">', $the_id);
+			}
+			
+		}
+/*
+				if($the_type == 'checkbox'){
+					$form_html .= sprintf('<input type="checkbox" name="%s_%s">', $the_type, $the_id);
+				}else{
+					$form_html .= sprintf('<input type="text" name="%s_%s">', $the_type, $the_id);
+				}
+*/
+		
+		$data_legal_notices = $data_preferences = false;
+		
+		$arr_legal_notices = $form->form_legal_notices;
+		$this->write_log('$arr_legal_notices'); $this->write_log($arr_legal_notices);
+		
+		$arr_preferences = $form->form_preferences;
+		$this->write_log('$arr_preferences'); $this->write_log($arr_preferences);
+		
+		if($arr_legal_notices){
+			foreach($arr_legal_notices as $i => $key){
+				if($key){
+					$data_legal_notices[] = array('identifier' => $key);
+
+					$yes_no = ( in_array($_POST[$key], array('on', 'yes', 1)) ) ? true : false;
+					$data_preferences[$key] = $yes_no;
+				}				
+			}
+		}
+
+		if($arr_preferences){
+			foreach($arr_preferences as $i => $key){
+				if($key){
+					
+					//sprintf('%s||%s||%s', $the_id, $the_type, $the_key);
+					$arr_tmp = explode('||', $key);
+					if($the_id = (string)$arr_tmp[0]){
+						$the_key = sprintf('input_%s', $the_id);
+						$the_value = rgar( $entry, $the_id );
+						$yes_no = ( in_array($the_value, array('on', 'yes', 1)) ) ? true : false;
+
+						$data_preferences[$the_key] = $yes_no;						
+						$data_legal_notices[] = array('identifier' => $the_key);
+						
+						$form_html .= sprintf('<input type="checkbox" name="input_%s" value="1">', $the_id);
+					}
+				}				
+			}
+		}
+
+		$form_html .= '<input type="submit" name="submit" value="Submit">';
+		$form_html .= '</form>';
+		
+		$consent_data = array(
+			'subject' => array(
+				'email' => $value_email,
+				'first_name' => $value_first_name,
+				'last_name' => $value_last_name,
+			),
+			'legal_notices' => $data_legal_notices,
+			'proofs' => array(
+				array(
+					'content' => $_POST,
+					'form' => $form_html,
+				)
+			),
+			'preferences' => array('privacy_policy_gform' => true),
+		);		
+		//__________________________________________________________________________________________________________________________
+		
+		$this->write_log('$consent_data'); $this->write_log($consent_data);
+
+		$response = wp_remote_post( iubenda()->options['cons']['cons_endpoint'], array(
+			'body'    => json_encode( $consent_data ),
+			'headers' => array(
+				'apikey'       => $public_api_key,
+				'Content-Type' => 'application/json',
+			),
+		) );
+		
+		$this->write_log('wp_remote_post $response');
+		if ( is_wp_error( $response ) ) {
+			$error_message = $response->get_error_message();
+			$this->write_log("Something went wrong: $error_message");
+		} else {
+			$this->write_log($response);
+		}
+
 	}
 	
 	
