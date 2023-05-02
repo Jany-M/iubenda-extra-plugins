@@ -19,6 +19,7 @@ class iubenda_extra_class{
 	public  $textdomain = 'iep';
 	protected static $_instance = null;
 	private $_sep = '__';
+	private $_enable_log = false;
 	
 	public function __construct(){
 		global $wpdb;
@@ -90,19 +91,10 @@ class iubenda_extra_class{
 	public function plugins_init(){}
 	
 	public function plugins_loaded(){
-		
-		//add_action('iub_before_call_give_forms', array($this, 'get_give_forms') );
-		//add_action('iub_before_call_speakout_forms', array($this, 'get_speakout_forms') );
-
-		add_action('give_insert_payment', array( $this, 'givewp_insert_payment' ), 1, 2 );
-		//add_action('give_checkout_before_gateway', array( $this, 'sync_give_donor_post' ), 9999, 3 );
-		//add_action( 'give_pre_form_output', array( $this, 'give_pre_form_output' ), 10, 3 );	
-		
+		add_action( 'give_insert_payment', array( $this, 'givewp_insert_payment' ), 1, 2 );
 		add_action( 'create_signature_after', array( $this, 'sync_signature' ), 9999, 2 );
-		
 		add_action( 'ninja_forms_after_submission', array( $this, 'sync_ninja_forms' ) );
 		add_action( 'charitable_after_save_donation', array( $this, 'sync_charitable' ), 9999, 2 );
-
 		add_action( 'gform_after_submission', array( $this, 'sync_gravity_form' ), 10, 2 );
 	}
 
@@ -134,8 +126,8 @@ class iubenda_extra_class{
 	}
 
 	public function write_log($txt){
-		//turn off the log
-		return true;
+		//turn on / off the log
+		if(!$this->_enable_log) return true;
 		
 		$log  = $this->whos_called() . PHP_EOL;
 		$log .= (is_array($txt) || is_object($txt)) ? print_r($txt, 1) : $txt;
@@ -364,8 +356,6 @@ class iubenda_extra_class{
 				}
 
 				$forms[] = $formdata;
-				
-				//echo '<pre>'; print_r( $forms ); echo '</pre>'; die;
 			}
 		}
 
@@ -431,15 +421,11 @@ class iubenda_extra_class{
 				}
 				
 				$forms[] = $formdata;
-				
-				//echo $the_form; 
-				//echo '<hr><pre>'; print_r( $forms ); echo '</pre>'; exit;					
 			}
 		}
 		
 		return $forms;
 	}
-
 
 	public function givewp_insert_payment($donationId, $donationData){
 		global $wp_version;
@@ -555,32 +541,8 @@ class iubenda_extra_class{
 	}
 	
 	public function sync_signature( $data, $id ){
-$this->write_log('$_POST'); $this->write_log($_POST);
-/*
-		DC()->logger('sync_signature DATA', $data); 
-		$data = array(
-			'petitions_id'      => $petition_id,
-			'honorific'			=> $this->honorific,
-			'first_name'        => $this->first_name,
-			'last_name'         => $this->last_name,
-			'email'             => $this->email,
-			'date'              => $this->date,
-			'confirmation_code' => $this->confirmation_code,
-			//'is_confirmed'      => $this->is_confirmed,
-			'is_confirmed'      => 1,
-			'optin'             => $this->optin,
-			'street_address'    => $this->street_address,
-			'city'              => $this->city,
-			'state'             => $this->state,
-			'postcode'          => $this->postcode,
-			'country'           => $this->country,
-			'custom_field'      => $this->custom_field,
-			'custom_message'    => $this->custom_message,
-			'language'          => $this->language,
-			'IP_address'		=> $_SERVER['REMOTE_ADDR'],
-			'campaign'			=> $this->campaign,
-		);
-*/
+		$this->write_log('$_POST'); $this->write_log($_POST);
+
 		global $wp_version;
 		$public_api_key = iubenda()->options['cons']['public_api_key'];
 		
@@ -594,10 +556,10 @@ $this->write_log('$_POST'); $this->write_log($_POST);
 			'source'		=> 'speakout',
 			'id'			=> $form_id,
 		);
-$this->write_log('$form_args'); $this->write_log($form_args);
+		$this->write_log('$form_args'); $this->write_log($form_args);
 
 		$form = iubenda()->forms->get_form_by_object_id($form_args);
-$this->write_log('$form'); $this->write_log($form);
+		$this->write_log('$form'); $this->write_log($form);
 
 		if ( ! $form ) {
 			return;
@@ -691,8 +653,7 @@ $this->write_log('$form'); $this->write_log($form);
 			$this->write_log($response);
 		}		
 
-
-return true;
+		return true;
 	}
 	
 	
@@ -776,7 +737,6 @@ return true;
 			}
 		}
 
-		///$this->write_log($forms);
 		return $forms;
 	}	
 	
@@ -905,8 +865,8 @@ return true;
 		foreach($fields as $i => $arr){
 			if( in_array($arr['settings']['type'], $filter) ){
 				$the_id = (int)$arr['id'];
-				$the_type = $arr['settings']['type'];
-				$the_key = $arr['settings']['key'];
+				$the_type = sanitize_key(trim($arr['settings']['type']));
+				$the_key = sanitize_key(trim($arr['settings']['key']));
 				$out[] = sprintf('%s%s%s%s%s', $the_id, $this->_sep, $the_type, $this->_sep, $the_key);
 			}
 		}
@@ -970,6 +930,54 @@ return true;
 
 
 
+	/*protected function ORIG_get_gravityform_fields($form_id, $filter = false, $input_name_filter = false){
+		if( !is_array($filter) ){
+			$filter = array(
+				'text',
+				'textarea',
+				'consent',
+				'checkbox',
+				'radio',
+				'lastname',
+				'name',
+				'hidden',
+				'email',
+				//'phone',
+			);
+		}
+
+		$out = false;
+		
+		$form = GFAPI::get_form( $form_id );
+		$this->write_log($form['fields']);
+		if( !isset($form['fields']) || ! is_array($form['fields']) ) return $out;
+
+		foreach ( $form['fields'] as $field ) {
+			if( in_array($field->type, $filter) ){
+				$the_id = trim((string)$field->id);
+				$the_type = sanitize_key(trim($field->type));
+				$the_key = sanitize_key(trim($field->label));
+				
+				if($the_type == 'consent'){
+					if( isset($field->inputs) && is_array($field->inputs) ){
+						foreach($field->inputs as $j => $r){
+							if(strtolower($r['label']) == 'consent'){
+								$the_id = trim((string)$r['id']);
+								break;
+							}
+						}
+					}
+				}
+				
+				//replace dot by _ to fix issue since April 22, 2023
+				$the_id = str_replace('.', '_', $the_id);
+				$out[] = sprintf('%s%s%s%s%s', $the_id, $this->_sep, $the_type, $this->_sep, $the_key);
+			}
+		}
+		
+		return $out;
+	}*/
+	
 	protected function _get_gravityform_fields($form_id, $filter = false, $input_name_filter = false){
 		if( !is_array($filter) ){
 			$filter = array(
@@ -989,35 +997,44 @@ return true;
 		$out = false;
 		
 		$form = GFAPI::get_form( $form_id );
-		//$this->write_log($form['fields']);
+		$this->write_log($form['fields']);
 		if( !isset($form['fields']) || ! is_array($form['fields']) ) return $out;
-
 
 		foreach ( $form['fields'] as $field ) {
 			if( in_array($field->type, $filter) ){
-				$the_id = (string)$field->id;
-				$the_type = $field->type;
-				$the_key = $field->label;
+				$the_id = trim((string)$field->id);
+				$the_type = sanitize_key(trim($field->type));
+				$the_key = sanitize_key(trim($field->label));
 				
-				if($the_type == 'consent'){
-					if( isset($field->inputs) && is_array($field->inputs) ){
-						foreach($field->inputs as $j => $r){
-							if(strtolower($r['label']) == 'consent'){
-								$the_id = (string)$r['id'];
-								break;
+				if( isset($field->inputs) && is_array($field->inputs) ){
+					foreach($field->inputs as $j => $r){
+						if(isset($r['isHidden']) && $r['isHidden'] == 1){
+							//skip it
+						}else{
+							$the_id = trim((string)$r['id']);
+							$the_key = sanitize_key(trim($r['label']));
+							if(isset($r['inputType'])){
+								$the_type = sanitize_key(trim($r['inputType']));
 							}
+							
+							//replace dot by _ to fix issue since April 22, 2023
+							$the_id = str_replace('.', '_', $the_id);
+							$out[] = sprintf('%s%s%s%s%s', $the_id, $this->_sep, $the_type, $this->_sep, $the_key);
 						}
 					}
-					$out[] = sprintf('%s||%s||%s', $the_id, $the_type, $the_key);
 				}else{
-					$out[] = sprintf('%s||%s||%s', $the_id, $the_type, $the_key);
+					
+					//replace dot by _ to fix issue since April 22, 2023
+					$the_id = str_replace('.', '_', $the_id);
+					$out[] = sprintf('%s%s%s%s%s', $the_id, $this->_sep, $the_type, $this->_sep, $the_key);
 				}
+				
 			}
 		}
 		
 		return $out;
 	}
-	
+
     protected function _get_all_gravityform(){
         $data = array();		
         $forms = GFAPI::get_forms();
@@ -1107,10 +1124,10 @@ return true;
 			
 			$this->write_log('$arr_subject'); $this->write_log($arr_subject);
 
-			$field_email = $arr_subject['email'];
-			$field_first_name = $arr_subject['first_name'];
-			$field_last_name = $arr_subject['last_name'];
-			$field_full_name = $arr_subject['full_name'];
+			$field_email = trim($arr_subject['email']);
+			$field_first_name = trim($arr_subject['first_name']);
+			$field_last_name = trim($arr_subject['last_name']);
+			$field_full_name = trim($arr_subject['full_name']);
 			
 			//sprintf('%s||%s||%s', $the_id, $the_type, $the_key);
 			$arr_field_email = explode($this->_sep, $field_email);
@@ -1119,25 +1136,25 @@ return true;
 			$arr_field_full_name = explode($this->_sep, $field_full_name);
 			
 			//find the value for each field
-			if($the_id = $arr_field_email[0]){
+			if($the_id = trim($arr_field_email[0])){
 				if( isset($formData['fields'][$the_id]['value']) ){
 					$value_email = $formData['fields'][$the_id]['value'];
 				} 
 			}
 			
-			if($the_id = $arr_field_first_name[0]){
+			if($the_id = trim($arr_field_first_name[0])){
 				if( isset($formData['fields'][$the_id]['value']) ){
 					$value_first_name = $formData['fields'][$the_id]['value'];
 				} 
 			}
 			
-			if($the_id = $arr_field_last_name[0]){
+			if($the_id = trim($arr_field_last_name[0])){
 				if( isset($formData['fields'][$the_id]['value']) ){
 					$value_last_name = $formData['fields'][$the_id]['value'];
 				} 
 			}
 			
-			if($the_id = $arr_field_full_name[0]){
+			if($the_id = trim($arr_field_full_name[0])){
 				if( isset($formData['fields'][$the_id]['value']) ){
 					$value_full_name = $formData['fields'][$the_id]['value'];
 				} 
@@ -1169,7 +1186,7 @@ return true;
 					
 					//sprintf('%s||%s||%s', $the_id, $the_type, $the_key);
 					$arr_tmp = explode($this->_sep, $key);
-					if($the_id = $arr_tmp[0]){
+					if($the_id = trim($arr_tmp[0])){
 						if( isset($formData['fields'][$the_id]['value']) ){
 							$the_value = $formData['fields'][$the_id]['value'];
 							$the_key = sprintf('%s_%s', $arr_tmp[1], $the_id);
@@ -1348,8 +1365,8 @@ return true;
 	
 
 	public function sync_gravity_form($entry, $gf_form){
-		///$this->write_log('$entry'); $this->write_log($entry);
-		///$this->write_log('$gf_form'); $this->write_log($gf_form);
+		$this->write_log('$entry'); $this->write_log($entry);
+		$this->write_log('$gf_form'); $this->write_log($gf_form);
 		
 		global $wp_version;
 		$source = 'gravityform';
@@ -1383,34 +1400,38 @@ return true;
 			
 			$this->write_log('$arr_subject'); $this->write_log($arr_subject);
 
-			$field_email = $arr_subject['email'];
-			$field_first_name = $arr_subject['first_name'];
-			$field_last_name = $arr_subject['last_name'];
-			$field_full_name = $arr_subject['full_name'];
+			$field_email = trim($arr_subject['email']);
+			$field_first_name = trim($arr_subject['first_name']);
+			$field_last_name = trim($arr_subject['last_name']);
+			$field_full_name = trim($arr_subject['full_name']);
 			
 			//sprintf('%s||%s||%s', $the_id, $the_type, $the_key);
-			$arr_field_email = explode('||', $field_email);
-			$arr_field_first_name = explode('||', $field_first_name);
-			$arr_field_last_name = explode('||', $field_last_name);
-			$arr_field_full_name = explode('||', $field_full_name);
+			$arr_field_email = explode($this->_sep, $field_email);
+			$arr_field_first_name = explode($this->_sep, $field_first_name);
+			$arr_field_last_name = explode($this->_sep, $field_last_name);
+			$arr_field_full_name = explode($this->_sep, $field_full_name);
 			
 			//find the value for each field
-			if($the_id = $arr_field_email[0]){
+			if($the_id_ = trim($arr_field_email[0])){
+				$the_id = str_replace('_', '.', $the_id_);
 				$value_email = rgar( $entry, (string)$the_id );
 				$form_html .= sprintf('<input type="text" name="input_%s">', $the_id);
 			}
 			
-			if($the_id = $arr_field_first_name[0]){
+			if($the_id_ = trim($arr_field_first_name[0])){
+				$the_id = str_replace('_', '.', $the_id_);
 				$value_first_name = rgar( $entry, (string)$the_id );
 				$form_html .= sprintf('<input type="text" name="input_%s">', $the_id);
 			}
 			
-			if($the_id = $arr_field_last_name[0]){
+			if($the_id_ = trim($arr_field_last_name[0])){
+				$the_id = str_replace('_', '.', $the_id_);
 				$value_last_name = rgar( $entry, (string)$the_id );
 				$form_html .= sprintf('<input type="text" name="input_%s">', $the_id);
 			}
 			
-			if($the_id = $arr_field_full_name[0]){
+			if($the_id_ = trim($arr_field_full_name[0])){
+				$the_id = str_replace('_', '.', $the_id_);
 				$value_full_name = rgar( $entry, (string)$the_id );
 				$form_html .= sprintf('<input type="text" name="input_%s">', $the_id);
 			}
@@ -1448,8 +1469,9 @@ return true;
 				if($key){
 					
 					//sprintf('%s||%s||%s', $the_id, $the_type, $the_key);
-					$arr_tmp = explode('||', $key);
-					if($the_id = (string)$arr_tmp[0]){
+					$arr_tmp = explode($this->_sep, $key);
+					if($the_id_ = trim((string)$arr_tmp[0])){
+						$the_id = str_replace('_', '.', $the_id_);
 						$the_key = sprintf('input_%s', $the_id);
 						$the_value = rgar( $entry, $the_id );
 						$yes_no = ( in_array($the_value, array('on', 'yes', 1)) ) ? true : false;
